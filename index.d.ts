@@ -1,3 +1,2 @@
-import { Long } from "./types.js";
-export = Long;
-export as namespace Long;
+declare function setPrototypeOf(o: any, proto: object | null): any;
+export = setPrototypeOf;
