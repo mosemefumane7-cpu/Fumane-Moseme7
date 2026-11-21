@@ -1,58 +1,108 @@
-1.3.3 / 2019-04-15
+0.6.3 / 2022-01-22
 ==================
 
-  * Fix Node.js 0.8 return value inconsistencies
+  * Revert "Lazy-load modules from main entry point"
 
-1.3.2 / 2017-09-09
+0.6.2 / 2019-04-29
 ==================
 
-  * perf: reduce overhead for full URLs
-  * perf: unroll the "fast-path" `RegExp`
+  * Fix sorting charset, encoding, and language with extra parameters
 
-1.3.1 / 2016-01-17
+0.6.1 / 2016-05-02
 ==================
 
+  * perf: improve `Accept` parsing speed
+  * perf: improve `Accept-Charset` parsing speed
+  * perf: improve `Accept-Encoding` parsing speed
+  * perf: improve `Accept-Language` parsing speed
+
+0.6.0 / 2015-09-29
+==================
+
+  * Fix including type extensions in parameters in `Accept` parsing
+  * Fix parsing `Accept` parameters with quoted equals
+  * Fix parsing `Accept` parameters with quoted semicolons
+  * Lazy-load modules from main entry point
+  * perf: delay type concatenation until needed
   * perf: enable strict mode
+  * perf: hoist regular expressions
+  * perf: remove closures getting spec properties
+  * perf: remove a closure from media type parsing
+  * perf: remove property delete from media type parsing
 
-1.3.0 / 2014-08-09
+0.5.3 / 2015-05-10
 ==================
 
-  * Add `parseurl.original` for parsing `req.originalUrl` with fallback
-  * Return `undefined` if `req.url` is `undefined`
+  * Fix media type parameter matching to be case-insensitive
 
-1.2.0 / 2014-07-21
+0.5.2 / 2015-05-06
 ==================
 
-  * Cache URLs based on original value
-  * Remove no-longer-needed URL mis-parse work-around
-  * Simplify the "fast-path" `RegExp`
+  * Fix comparing media types with quoted values
+  * Fix splitting media types with quoted commas
 
-1.1.3 / 2014-07-08
+0.5.1 / 2015-02-14
 ==================
 
-  * Fix typo
+  * Fix preference sorting to be stable for long acceptable lists
 
-1.1.2 / 2014-07-08
+0.5.0 / 2014-12-18
 ==================
 
-  * Seriously fix Node.js 0.8 compatibility
+  * Fix list return order when large accepted list
+  * Fix missing identity encoding when q=0 exists
+  * Remove dynamic building of Negotiator class
 
-1.1.1 / 2014-07-08
+0.4.9 / 2014-10-14
 ==================
 
-  * Fix Node.js 0.8 compatibility
+  * Fix error when media type has invalid parameter
 
-1.1.0 / 2014-07-08
+0.4.8 / 2014-09-28
 ==================
 
-  * Incorporate URL href-only parse fast-path
+  * Fix all negotiations to be case-insensitive
+  * Stable sort preferences of same quality according to client order
+  * Support Node.js 0.6
 
-1.0.1 / 2014-03-08
+0.4.7 / 2014-06-24
 ==================
 
-  * Add missing `require`
+  * Handle invalid provided languages
+  * Handle invalid provided media types
 
-1.0.0 / 2014-03-08
+0.4.6 / 2014-06-11
 ==================
 
-  * Genesis from `connect`
+  *  Order by specificity when quality is the same
+
+0.4.5 / 2014-05-29
+==================
+
+  * Fix regression in empty header handling
+
+0.4.4 / 2014-05-29
+==================
+
+  * Fix behaviors when headers are not present
+
+0.4.3 / 2014-04-16
+==================
+
+  * Handle slashes on media params correctly
+
+0.4.2 / 2014-02-28
+==================
+
+  * Fix media type sorting
+  * Handle media types params strictly
+
+0.4.1 / 2014-01-16
+==================
+
+  * Use most specific matches
+
+0.4.0 / 2014-01-09
+==================
+
+  * Remove preferred prefix from methods

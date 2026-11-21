@@ -1,19 +1,81 @@
 'use strict';
 
-const PromiseConnection = require('./connection.js');
+const Connection = require('./connection.js');
 
-class PromisePoolConnection extends PromiseConnection {
-  constructor(connection, promiseImpl) {
-    super(connection, promiseImpl);
+class PoolConnection extends Connection {
+  constructor(pool, options) {
+    super(options);
+    this._pool = pool;
+    this._released = false;
+    this.lastActiveTime = Date.now();
+    this.once('end', () => {
+      this._removeFromPool();
+    });
+    this.once('error', () => {
+      this._removeFromPool();
+    });
+  }
+
+  release() {
+    if (this._released) {
+      return;
+    }
+    if (!this._pool || this._pool._closed) {
+      return;
+    }
+    this._released = true;
+    this.lastActiveTime = Date.now();
+    this._pool.releaseConnection(this);
+  }
+
+  [Symbol.dispose]() {
+    this.release();
+  }
+
+  end(callback) {
+    if (this.config.gracefulEnd) {
+      this._removeFromPool();
+      super.end(callback);
+
+      return;
+    }
+
+    const err = new Error(
+      'Calling conn.end() to release a pooled connection is ' +
+        'deprecated. In next version calling conn.end() will be ' +
+        'restored to default conn.end() behavior. Use ' +
+        'conn.release() instead.'
+    );
+    this.emit('warn', err);
+    console.warn(err.message);
+    this.release();
+    if (typeof callback === 'function') {
+      callback();
+    }
   }
 
   destroy() {
-    return this.connection.destroy();
+    this._removeFromPool();
+    super.destroy();
   }
 
-  async [Symbol.asyncDispose]() {
-    this.release();
+  _removeFromPool() {
+    if (!this._pool || this._pool._closed) {
+      return;
+    }
+    const pool = this._pool;
+    this._pool = null;
+    pool._removeConnection(this);
+  }
+
+  promise(promiseImpl) {
+    const PromisePoolConnection = require('./promise/pool_connection.js');
+    return new PromisePoolConnection(this, promiseImpl);
   }
 }
 
-module.exports = PromisePoolConnection;
+PoolConnection.statementKey = Connection.statementKey;
+module.exports = PoolConnection;
+
+// TODO: Remove this when we are removing PoolConnection#end
+PoolConnection.prototype._realEnd = Connection.prototype.end;
