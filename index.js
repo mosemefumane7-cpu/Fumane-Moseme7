@@ -1,11 +1,27 @@
-/*!
- * express
- * Copyright(c) 2009-2013 TJ Holowaychuk
- * Copyright(c) 2013 Roman Shtylman
- * Copyright(c) 2014-2015 Douglas Christopher Wilson
- * MIT Licensed
- */
-
 'use strict';
 
-module.exports = require('./lib/express');
+var reflectGetProto = require('./Reflect.getPrototypeOf');
+var originalGetProto = require('./Object.getPrototypeOf');
+
+var getDunderProto = require('dunder-proto/get');
+
+/** @type {import('.')} */
+module.exports = reflectGetProto
+	? function getProto(O) {
+		// @ts-expect-error TS can't narrow inside a closure, for some reason
+		return reflectGetProto(O);
+	}
+	: originalGetProto
+		? function getProto(O) {
+			if (!O || (typeof O !== 'object' && typeof O !== 'function')) {
+				throw new TypeError('getProto: not an object');
+			}
+			// @ts-expect-error TS can't narrow inside a closure, for some reason
+			return originalGetProto(O);
+		}
+		: getDunderProto
+			? function getProto(O) {
+				// @ts-expect-error TS can't narrow inside a closure, for some reason
+				return getDunderProto(O);
+			}
+			: null;
