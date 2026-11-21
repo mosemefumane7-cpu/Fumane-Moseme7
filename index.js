@@ -1,182 +1,270 @@
-"use strict"
+/*!
+ * media-typer
+ * Copyright(c) 2014 Douglas Christopher Wilson
+ * MIT Licensed
+ */
 
-var Buffer = require("safer-buffer").Buffer
+/**
+ * RegExp to match *( ";" parameter ) in RFC 2616 sec 3.7
+ *
+ * parameter     = token "=" ( token | quoted-string )
+ * token         = 1*<any CHAR except CTLs or separators>
+ * separators    = "(" | ")" | "<" | ">" | "@"
+ *               | "," | ";" | ":" | "\" | <">
+ *               | "/" | "[" | "]" | "?" | "="
+ *               | "{" | "}" | SP | HT
+ * quoted-string = ( <"> *(qdtext | quoted-pair ) <"> )
+ * qdtext        = <any TEXT except <">>
+ * quoted-pair   = "\" CHAR
+ * CHAR          = <any US-ASCII character (octets 0 - 127)>
+ * TEXT          = <any OCTET except CTLs, but including LWS>
+ * LWS           = [CRLF] 1*( SP | HT )
+ * CRLF          = CR LF
+ * CR            = <US-ASCII CR, carriage return (13)>
+ * LF            = <US-ASCII LF, linefeed (10)>
+ * SP            = <US-ASCII SP, space (32)>
+ * SHT           = <US-ASCII HT, horizontal-tab (9)>
+ * CTL           = <any US-ASCII control character (octets 0 - 31) and DEL (127)>
+ * OCTET         = <any 8-bit sequence of data>
+ */
+var paramRegExp = /; *([!#$%&'\*\+\-\.0-9A-Z\^_`a-z\|~]+) *= *("(?:[ !\u0023-\u005b\u005d-\u007e\u0080-\u00ff]|\\[\u0020-\u007e])*"|[!#$%&'\*\+\-\.0-9A-Z\^_`a-z\|~]+) */g;
+var textRegExp = /^[\u0020-\u007e\u0080-\u00ff]+$/
+var tokenRegExp = /^[!#$%&'\*\+\-\.0-9A-Z\^_`a-z\|~]+$/
 
-var bomHandling = require("./bom-handling")
-var mergeModules = require("./helpers/merge-exports")
+/**
+ * RegExp to match quoted-pair in RFC 2616
+ *
+ * quoted-pair = "\" CHAR
+ * CHAR        = <any US-ASCII character (octets 0 - 127)>
+ */
+var qescRegExp = /\\([\u0000-\u007f])/g;
 
-// All codecs and aliases are kept here, keyed by encoding name/alias.
-// They are lazy loaded in `iconv.getCodec` from `encodings/index.js`.
-// Cannot initialize with { __proto__: null } because Boolean({ __proto__: null }) === true
-module.exports.encodings = null
+/**
+ * RegExp to match chars that must be quoted-pair in RFC 2616
+ */
+var quoteRegExp = /([\\"])/g;
 
-// Characters emitted in case of error.
-module.exports.defaultCharUnicode = "�"
-module.exports.defaultCharSingleByte = "?"
+/**
+ * RegExp to match type in RFC 6838
+ *
+ * type-name = restricted-name
+ * subtype-name = restricted-name
+ * restricted-name = restricted-name-first *126restricted-name-chars
+ * restricted-name-first  = ALPHA / DIGIT
+ * restricted-name-chars  = ALPHA / DIGIT / "!" / "#" /
+ *                          "$" / "&" / "-" / "^" / "_"
+ * restricted-name-chars =/ "." ; Characters before first dot always
+ *                              ; specify a facet name
+ * restricted-name-chars =/ "+" ; Characters after last plus always
+ *                              ; specify a structured syntax suffix
+ * ALPHA =  %x41-5A / %x61-7A   ; A-Z / a-z
+ * DIGIT =  %x30-39             ; 0-9
+ */
+var subtypeNameRegExp = /^[A-Za-z0-9][A-Za-z0-9!#$&^_.-]{0,126}$/
+var typeNameRegExp = /^[A-Za-z0-9][A-Za-z0-9!#$&^_-]{0,126}$/
+var typeRegExp = /^ *([A-Za-z0-9][A-Za-z0-9!#$&^_-]{0,126})\/([A-Za-z0-9][A-Za-z0-9!#$&^_.+-]{0,126}) *$/;
 
-// Public API.
-module.exports.encode = function encode (str, encoding, options) {
-  str = "" + (str || "") // Ensure string.
+/**
+ * Module exports.
+ */
 
-  var encoder = module.exports.getEncoder(encoding, options)
+exports.format = format
+exports.parse = parse
 
-  var res = encoder.write(str)
-  var trail = encoder.end()
+/**
+ * Format object to media type.
+ *
+ * @param {object} obj
+ * @return {string}
+ * @api public
+ */
 
-  return (trail && trail.length > 0) ? Buffer.concat([res, trail]) : res
-}
+function format(obj) {
+  if (!obj || typeof obj !== 'object') {
+    throw new TypeError('argument obj is required')
+  }
 
-module.exports.decode = function decode (buf, encoding, options) {
-  if (typeof buf === "string") {
-    if (!module.exports.skipDecodeWarning) {
-      console.error("Iconv-lite warning: decode()-ing strings is deprecated. Refer to https://github.com/ashtuchkin/iconv-lite/wiki/Use-Buffers-when-decoding")
-      module.exports.skipDecodeWarning = true
+  var parameters = obj.parameters
+  var subtype = obj.subtype
+  var suffix = obj.suffix
+  var type = obj.type
+
+  if (!type || !typeNameRegExp.test(type)) {
+    throw new TypeError('invalid type')
+  }
+
+  if (!subtype || !subtypeNameRegExp.test(subtype)) {
+    throw new TypeError('invalid subtype')
+  }
+
+  // format as type/subtype
+  var string = type + '/' + subtype
+
+  // append +suffix
+  if (suffix) {
+    if (!typeNameRegExp.test(suffix)) {
+      throw new TypeError('invalid suffix')
     }
 
-    buf = Buffer.from("" + (buf || ""), "binary") // Ensure buffer.
+    string += '+' + suffix
   }
 
-  var decoder = module.exports.getDecoder(encoding, options)
+  // append parameters
+  if (parameters && typeof parameters === 'object') {
+    var param
+    var params = Object.keys(parameters).sort()
 
-  var res = decoder.write(buf)
-  var trail = decoder.end()
+    for (var i = 0; i < params.length; i++) {
+      param = params[i]
 
-  return trail ? (res + trail) : res
-}
+      if (!tokenRegExp.test(param)) {
+        throw new TypeError('invalid parameter name')
+      }
 
-module.exports.encodingExists = function encodingExists (enc) {
-  try {
-    module.exports.getCodec(enc)
-    return true
-  } catch (e) {
-    return false
-  }
-}
-
-// Legacy aliases to convert functions
-module.exports.toEncoding = module.exports.encode
-module.exports.fromEncoding = module.exports.decode
-
-// Search for a codec in iconv.encodings. Cache codec data in iconv._codecDataCache.
-module.exports._codecDataCache = { __proto__: null }
-
-module.exports.getCodec = function getCodec (encoding) {
-  if (!module.exports.encodings) {
-    var raw = require("../encodings")
-    // TODO: In future versions when old nodejs support is removed can use object.assign
-    module.exports.encodings = { __proto__: null } // Initialize as empty object.
-    mergeModules(module.exports.encodings, raw)
-  }
-
-  // Canonicalize encoding name: strip all non-alphanumeric chars and appended year.
-  var enc = module.exports._canonicalizeEncoding(encoding)
-
-  // Traverse iconv.encodings to find actual codec.
-  var codecOptions = {}
-  while (true) {
-    var codec = module.exports._codecDataCache[enc]
-
-    if (codec) { return codec }
-
-    var codecDef = module.exports.encodings[enc]
-
-    switch (typeof codecDef) {
-      case "string": // Direct alias to other encoding.
-        enc = codecDef
-        break
-
-      case "object": // Alias with options. Can be layered.
-        for (var key in codecDef) { codecOptions[key] = codecDef[key] }
-
-        if (!codecOptions.encodingName) { codecOptions.encodingName = enc }
-
-        enc = codecDef.type
-        break
-
-      case "function": // Codec itself.
-        if (!codecOptions.encodingName) { codecOptions.encodingName = enc }
-
-        // The codec function must load all tables and return object with .encoder and .decoder methods.
-        // It'll be called only once (for each different options object).
-        //
-        codec = new codecDef(codecOptions, module.exports)
-
-        module.exports._codecDataCache[codecOptions.encodingName] = codec // Save it to be reused later.
-        return codec
-
-      default:
-        throw new Error("Encoding not recognized: '" + encoding + "' (searched as: '" + enc + "')")
+      string += '; ' + param + '=' + qstring(parameters[param])
     }
   }
+
+  return string
 }
 
-module.exports._canonicalizeEncoding = function (encoding) {
-  // Canonicalize encoding name: strip all non-alphanumeric chars and appended year.
-  return ("" + encoding).toLowerCase().replace(/:\d{4}$|[^0-9a-z]/g, "")
-}
+/**
+ * Parse media type to object.
+ *
+ * @param {string|object} string
+ * @return {Object}
+ * @api public
+ */
 
-module.exports.getEncoder = function getEncoder (encoding, options) {
-  var codec = module.exports.getCodec(encoding)
-  var encoder = new codec.encoder(options, codec)
-
-  if (codec.bomAware && options && options.addBOM) { encoder = new bomHandling.PrependBOM(encoder, options) }
-
-  return encoder
-}
-
-module.exports.getDecoder = function getDecoder (encoding, options) {
-  var codec = module.exports.getCodec(encoding)
-  var decoder = new codec.decoder(options, codec)
-
-  if (codec.bomAware && !(options && options.stripBOM === false)) { decoder = new bomHandling.StripBOM(decoder, options) }
-
-  return decoder
-}
-
-// Streaming API
-// NOTE: Streaming API naturally depends on 'stream' module from Node.js. Unfortunately in browser environments this module can add
-// up to 100Kb to the output bundle. To avoid unnecessary code bloat, we don't enable Streaming API in browser by default.
-// If you would like to enable it explicitly, please add the following code to your app:
-// > iconv.enableStreamingAPI(require('stream'));
-module.exports.enableStreamingAPI = function enableStreamingAPI (streamModule) {
-  if (module.exports.supportsStreams) { return }
-
-  // Dependency-inject stream module to create IconvLite stream classes.
-  var streams = require("./streams")(streamModule)
-
-  // Not public API yet, but expose the stream classes.
-  module.exports.IconvLiteEncoderStream = streams.IconvLiteEncoderStream
-  module.exports.IconvLiteDecoderStream = streams.IconvLiteDecoderStream
-
-  // Streaming API.
-  module.exports.encodeStream = function encodeStream (encoding, options) {
-    return new module.exports.IconvLiteEncoderStream(module.exports.getEncoder(encoding, options), options)
+function parse(string) {
+  if (!string) {
+    throw new TypeError('argument string is required')
   }
 
-  module.exports.decodeStream = function decodeStream (encoding, options) {
-    return new module.exports.IconvLiteDecoderStream(module.exports.getDecoder(encoding, options), options)
+  // support req/res-like objects as argument
+  if (typeof string === 'object') {
+    string = getcontenttype(string)
   }
 
-  module.exports.supportsStreams = true
+  if (typeof string !== 'string') {
+    throw new TypeError('argument string is required to be a string')
+  }
+
+  var index = string.indexOf(';')
+  var type = index !== -1
+    ? string.substr(0, index)
+    : string
+
+  var key
+  var match
+  var obj = splitType(type)
+  var params = {}
+  var value
+
+  paramRegExp.lastIndex = index
+
+  while (match = paramRegExp.exec(string)) {
+    if (match.index !== index) {
+      throw new TypeError('invalid parameter format')
+    }
+
+    index += match[0].length
+    key = match[1].toLowerCase()
+    value = match[2]
+
+    if (value[0] === '"') {
+      // remove quotes and escapes
+      value = value
+        .substr(1, value.length - 2)
+        .replace(qescRegExp, '$1')
+    }
+
+    params[key] = value
+  }
+
+  if (index !== -1 && index !== string.length) {
+    throw new TypeError('invalid parameter format')
+  }
+
+  obj.parameters = params
+
+  return obj
 }
 
-// Enable Streaming API automatically if 'stream' module is available and non-empty (the majority of environments).
-var streamModule
-try {
-  streamModule = require("stream")
-} catch (e) {}
+/**
+ * Get content-type from req/res objects.
+ *
+ * @param {object}
+ * @return {Object}
+ * @api private
+ */
 
-if (streamModule && streamModule.Transform) {
-  module.exports.enableStreamingAPI(streamModule)
-} else {
-  // In rare cases where 'stream' module is not available by default, throw a helpful exception.
-  module.exports.encodeStream = module.exports.decodeStream = function () {
-    throw new Error("iconv-lite Streaming API is not enabled. Use iconv.enableStreamingAPI(require('stream')); to enable it.")
+function getcontenttype(obj) {
+  if (typeof obj.getHeader === 'function') {
+    // res-like
+    return obj.getHeader('content-type')
+  }
+
+  if (typeof obj.headers === 'object') {
+    // req-like
+    return obj.headers && obj.headers['content-type']
   }
 }
 
-// Some environments, such as browsers, may not load JavaScript files as UTF-8
-// eslint-disable-next-line no-constant-condition
-if ("Ā" !== "\u0100") {
-  console.error("iconv-lite warning: js files use non-utf8 encoding. See https://github.com/ashtuchkin/iconv-lite/wiki/Javascript-source-file-encodings for more info.")
+/**
+ * Quote a string if necessary.
+ *
+ * @param {string} val
+ * @return {string}
+ * @api private
+ */
+
+function qstring(val) {
+  var str = String(val)
+
+  // no need to quote tokens
+  if (tokenRegExp.test(str)) {
+    return str
+  }
+
+  if (str.length > 0 && !textRegExp.test(str)) {
+    throw new TypeError('invalid parameter value')
+  }
+
+  return '"' + str.replace(quoteRegExp, '\\$1') + '"'
+}
+
+/**
+ * Simply "type/subtype+siffx" into parts.
+ *
+ * @param {string} string
+ * @return {Object}
+ * @api private
+ */
+
+function splitType(string) {
+  var match = typeRegExp.exec(string.toLowerCase())
+
+  if (!match) {
+    throw new TypeError('invalid media type')
+  }
+
+  var type = match[1]
+  var subtype = match[2]
+  var suffix
+
+  // suffix after last +
+  var index = subtype.lastIndexOf('+')
+  if (index !== -1) {
+    suffix = subtype.substr(index + 1)
+    subtype = subtype.substr(0, index)
+  }
+
+  var obj = {
+    type: type,
+    subtype: subtype,
+    suffix: suffix
+  }
+
+  return obj
 }
